@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NFC Tag Collector</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #242836;
+    --border: #2e3344;
+    --text: #e2e4ed;
+    --text-dim: #8b8fa3;
+    --accent: #6c8cff;
+    --accent-dim: #4a64cc;
+    --green: #4ade80;
+    --yellow: #facc15;
+    --red: #f87171;
+    --orange: #fb923c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  header h1 { font-size: 1.2rem; font-weight: 600; }
+  nav {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  nav button {
+    flex: 1;
+    padding: 12px;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+  }
+  nav button.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  main { flex: 1; padding: 20px; overflow-y: auto; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+
+  /* Scan tab */
+  .scan-area { text-align: center; padding: 40px 20px; }
+  .scan-btn {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    border: 3px solid var(--accent);
+    background: var(--surface2);
+    color: var(--accent);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.3s;
+    margin: 20px auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .scan-btn.scanning {
+    border-color: var(--green);
+    color: var(--green);
+    animation: pulse 1.5s infinite;
+  }
+  .scan-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.3); }
+    50% { box-shadow: 0 0 0 15px rgba(74, 222, 128, 0); }
+  }
+  .scan-status { margin-top: 16px; font-size: 0.9rem; color: var(--text-dim); }
+  .scan-status.active { color: var(--green); }
+  .nfc-icon { font-size: 2rem; }
+
+  /* Log tab */
+  .log-entry {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 10px;
+  }
+  .log-entry .uid { font-family: monospace; font-size: 0.85rem; color: var(--accent); }
+  .log-entry .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-right: 6px;
+  }
+  .badge-new { background: rgba(74,222,128,0.15); color: var(--green); }
+  .badge-dup { background: rgba(250,204,21,0.15); color: var(--yellow); }
+  .badge-conflict { background: rgba(251,146,60,0.15); color: var(--orange); }
+  .badge-error { background: rgba(248,113,113,0.15); color: var(--red); }
+  .log-entry .time { font-size: 0.75rem; color: var(--text-dim); margin-top: 6px; }
+  .log-entry .details { margin-top: 8px; font-size: 0.85rem; color: var(--text-dim); }
+  .empty-state { text-align: center; color: var(--text-dim); padding: 60px 20px; }
+
+  /* Settings */
+  .form-group { margin-bottom: 16px; }
+  .form-group label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .form-group input {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.9rem;
+  }
+  .form-group input:focus { outline: none; border-color: var(--accent); }
+  .btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:active { background: var(--accent-dim); }
+  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-row { display: flex; gap: 10px; margin-top: 20px; }
+  .status-msg { margin-top: 10px; font-size: 0.85rem; }
+  .status-msg.ok { color: var(--green); }
+  .status-msg.err { color: var(--red); }
+  .note { font-size: 0.8rem; color: var(--text-dim); margin-top: 12px; line-height: 1.5; }
+
+  /* Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    width: 100%;
+    max-width: 400px;
+  }
+  .modal h3 { margin-bottom: 16px; font-size: 1rem; }
+  .modal .tag-info {
+    background: var(--surface2);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    font-size: 0.85rem;
+  }
+  .modal .tag-info .field { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .modal .tag-info .field:last-child { margin-bottom: 0; }
+  .modal .tag-info .label { color: var(--text-dim); }
+  .modal .tag-info .value { font-family: monospace; }
+  .modal textarea {
+    width: 100%;
+    height: 70px;
+    padding: 10px 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.9rem;
+    resize: vertical;
+    margin-bottom: 12px;
+  }
+  .modal textarea:focus { outline: none; border-color: var(--accent); }
+  .modal .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .modal .checkbox-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent);
+  }
+  .modal .checkbox-row label { font-size: 0.9rem; }
+  .modal .btn-row { justify-content: flex-end; }
+  .modal .status-msg { margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>NFC Tag Collector</h1>
+</header>
+
+<nav>
+  <button class="active" data-tab="scan">Scan</button>
+  <button data-tab="log">Log</button>
+  <button data-tab="settings">Settings</button>
+</nav>
+
+<main>
+  <!-- SCAN TAB -->
+  <div id="tab-scan" class="tab active">
+    <div class="scan-area">
+      <p style="color:var(--text-dim); margin-bottom:8px;">Tap to start scanning</p>
+      <button id="scanBtn" class="scan-btn" disabled>
+        <span class="nfc-icon">📡</span>
+        <span>Scan</span>
+      </button>
+      <p id="scanStatus" class="scan-status">Checking NFC support...</p>
+    </div>
+  </div>
+
+  <!-- LOG TAB -->
+  <div id="tab-log" class="tab">
+    <div id="logContainer">
+      <div class="empty-state">No scans yet.<br>Tap a tag to get started.</div>
+    </div>
+  </div>
+
+  <!-- SETTINGS TAB -->
+  <div id="tab-settings" class="tab">
+    <div class="form-group">
+      <label>CouchDB URL</label>
+      <input type="url" id="couchUrl" placeholder="http://localhost:5984" value="http://localhost:5984">
+    </div>
+    <div class="form-group">
+      <label>Database Name</label>
+      <input type="text" id="couchDb" placeholder="nfc_tags" value="nfc_tags">
+    </div>
+    <div class="form-group">
+      <label>Username (optional)</label>
+      <input type="text" id="couchUser" placeholder="admin">
+    </div>
+    <div class="form-group">
+      <label>Password (optional)</label>
+      <input type="password" id="couchPass" placeholder="password">
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="saveSettings">Save Settings</button>
+      <button class="btn btn-secondary" id="testConn">Test Connection</button>
+    </div>
+    <p id="settingsMsg" class="status-msg"></p>
+    <p class="note">
+      <strong>Note:</strong> The Web NFC API only exposes the tag's serial number (UID) and NDEF message.
+      Chip-level details (manufacturer, chip type, protocol, storage size) are not available in the browser.
+      These fields are stored as <code>null</code> and will be populated if a future API revision supports them.
+    </p>
+  </div>
+</main>
+
+<!-- TAG DETECTED MODAL -->
+<div class="modal-overlay" id="tagModal">
+  <div class="modal">
+    <h3>Tag Detected</h3>
+    <div class="tag-info" id="modalTagInfo"></div>
+    <div class="form-group">
+      <label>Note (optional)</label>
+      <textarea id="tagNote" placeholder="Add a comment about this tag..."></textarea>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="tagOwned">
+      <label for="tagOwned">I own this tag</label>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="modalCancel">Cancel</button>
+      <button class="btn btn-primary" id="modalSave">Save</button>
+    </div>
+    <p id="modalMsg" class="status-msg"></p>
+  </div>
+</div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+const state = {
+  scanning: false,
+  ndefReader: null,
+  pendingTag: null,
+  logs: [],
+  settings: {
+    couchUrl: localStorage.getItem('nfc_couchUrl') || 'http://localhost:5984',
+    couchDb: localStorage.getItem('nfc_couchDb') || 'nfc_tags',
+    couchUser: localStorage.getItem('nfc_couchUser') || '',
+    couchPass: localStorage.getItem('nfc_couchPass') || ''
+  }
+};
+
+// ─── Tab Navigation ───────────────────────────────────────────────────────────
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ─── NFC Support Check ────────────────────────────────────────────────────────
+function checkNFC() {
+  const btn = document.getElementById('scanBtn');
+  const status = document.getElementById('scanStatus');
+  if ('NDEFReader' in window) {
+    btn.disabled = false;
+    status.textContent = 'NFC ready. Tap Scan to begin.';
+  } else {
+    status.textContent = 'Web NFC is not supported in this browser. Use Chrome for Android.';
+    status.style.color = 'var(--red)';
+  }
+}
+checkNFC();
+
+// ─── Scan Logic ───────────────────────────────────────────────────────────────
+document.getElementById('scanBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('scanBtn');
+  const status = document.getElementById('scanStatus');
+
+  if (state.scanning) {
+    // Stop scanning
+    if (state.ndefReader) {
+      state.ndefReader.removeEventListener('reading', onTagRead);
+      state.ndefReader.removeEventListener('readingerror', onReadError);
+    }
+    state.scanning = false;
+    btn.classList.remove('scanning');
+    btn.querySelector('span:last-child').textContent = 'Scan';
+    status.textContent = 'Scan stopped.';
+    status.classList.remove('active');
+    return;
+  }
+
+  try {
+    state.ndefReader = new NDEFReader();
+    await state.ndefReader.scan();
+    state.scanning = true;
+    btn.classList.add('scanning');
+    btn.querySelector('span:last-child').textContent = 'Stop';
+    status.textContent = 'Scanning... bring a tag close to your phone.';
+    status.classList.add('active');
+
+    state.ndefReader.addEventListener('reading', onTagRead);
+    state.ndefReader.addEventListener('readingerror', onReadError);
+  } catch (err) {
+    status.textContent = 'Error: ' + err.message;
+    status.style.color = 'var(--red)';
+  }
+});
+
+function onReadError() {
+  addLog({ type: 'error', message: 'Error reading tag. Try repositioning.' });
+}
+
+function onTagRead(event) {
+  const { serialNumber, message } = event;
+
+  // Build tag metadata object
+  // NOTE: Web NFC API does NOT expose manufacturer, chipType, protocol, or storageSize.
+  // These are set to null. If a future API revision exposes them, update this section.
+  const tagInfo = {
+    serialNumber: serialNumber || 'unknown',
+    manufacturer: null,
+    chipType: null,
+    protocol: null,
+    storageSize: null,
+    ndefRecordCount: message ? message.records.length : 0,
+    timestamp: new Date().toISOString()
+  };
+
+  // Stop scanning
+  if (state.ndefReader) {
+    state.ndefReader.removeEventListener('reading', onTagRead);
+    state.ndefReader.removeEventListener('readingerror', onReadError);
+  }
+  state.scanning = false;
+  const btn = document.getElementById('scanBtn');
+  btn.classList.remove('scanning');
+  btn.querySelector('span:last-child').textContent = 'Scan';
+  document.getElementById('scanStatus').textContent = 'Tag detected. Review details.';
+  document.getElementById('scanStatus').classList.remove('active');
+
+  // Show modal
+  state.pendingTag = tagInfo;
+  showTagModal(tagInfo);
+}
+
+// ─── Modal ────────────────────────────────────────────────────────────────────
+function showTagModal(tag) {
+  const modal = document.getElementById('tagModal');
+  const info = document.getElementById('modalTagInfo');
+  document.getElementById('tagNote').value = '';
+  document.getElementById('tagOwned').checked = false;
+  document.getElementById('modalMsg').textContent = '';
+
+  info.innerHTML = `
+    <div class="field"><span class="label">UID</span><span class="value">${tag.serialNumber}</span></div>
+    <div class="field"><span class="label">Manufacturer</span><span class="value">${tag.manufacturer || 'N/A'}</span></div>
+    <div class="field"><span class="label">Chip Type</span><span class="value">${tag.chipType || 'N/A'}</span></div>
+    <div class="field"><span class="label">Protocol</span><span class="value">${tag.protocol || 'N/A'}</span></div>
+    <div class="field"><span class="label">Storage Size</span><span class="value">${tag.storageSize || 'N/A'}</span></div>
+    <div class="field"><span class="label">NDEF Records</span><span class="value">${tag.ndefRecordCount}</span></div>
+  `;
+  modal.classList.add('show');
+}
+
+document.getElementById('modalCancel').addEventListener('click', () => {
+  document.getElementById('tagModal').classList.remove('show');
+  state.pendingTag = null;
+});
+
+document.getElementById('modalSave').addEventListener('click', async () => {
+  const tag = state.pendingTag;
+  if (!tag) return;
+
+  const note = document.getElementById('tagNote').value.trim();
+  const owned = document.getElementById('tagOwned').checked;
+  const msg = document.getElementById('modalMsg');
+  const saveBtn = document.getElementById('modalSave');
+  saveBtn.disabled = true;
+  msg.textContent = 'Checking CouchDB...';
+  msg.className = 'status-msg';
+
+  try {
+    const result = await processTag(tag, note, owned);
+    document.getElementById('tagModal').classList.remove('show');
+    state.pendingTag = null;
+  } catch (err) {
+    msg.textContent = 'Error: ' + err.message;
+    msg.className = 'status-msg err';
+  } finally {
+    saveBtn.disabled = false;
+  }
+});
+
+// ─── CouchDB Logic ────────────────────────────────────────────────────────────
+function getCouchBase() {
+  const { couchUrl, couchDb } = state.settings;
+  return couchUrl.replace(/\/+$/, '') + '/' + couchDb;
+}
+
+function getCouchHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  if (state.settings.couchUser) {
+    const auth = btoa(`${state.settings.couchUser}:${state.settings.couchPass}`);
+    headers['Authorization'] = 'Basic ' + auth;
+  }
+  return headers;
+}
+
+async function ensureDatabase() {
+  const { couchUrl } = state.settings;
+  const base = couchUrl.replace(/\/+$/, '');
+  const db = state.settings.couchDb;
+  const headers = getCouchHeaders();
+
+  const res = await fetch(base + '/' + db, { method: 'PUT', headers });
+  if (res.status === 412) return; // Already exists
+  if (!res.ok) throw new Error('Failed to create database: ' + res.status);
+}
+
+async function getCouchDoc(docId) {
+  const base = getCouchBase();
+  const headers = getCouchHeaders();
+  const res = await fetch(base + '/' + encodeURIComponent(docId), { headers });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error('GET failed: ' + res.status);
+  return res.json();
+}
+
+async function putCouchDoc(docId, doc) {
+  const base = getCouchBase();
+  const headers = getCouchHeaders();
+  const res = await fetch(base + '/' + encodeURIComponent(docId), {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(doc)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error('PUT failed: ' + res.status + (err.error ? ' - ' + err.error : ''));
+  }
+  return res.json();
+}
+
+/**
+ * Determine if a tag entry matches an existing entry in the tags array.
+ * Compares all metadata fields (excluding note, owned, timestamp which are per-scan).
+ */
+function tagMatchesExisting(tag, existing) {
+  const fields = ['serialNumber', 'manufacturer', 'chipType', 'protocol', 'storageSize', 'ndefRecordCount'];
+  return fields.every(f => tag[f] === existing[f]);
+}
+
+async function processTag(tag, note, owned) {
+  const docId = tag.serialNumber;
+
+  // Ensure database exists
+  await ensureDatabase();
+
+  // Try to fetch existing document
+  let existingDoc = await getCouchDoc(docId);
+
+  if (!existingDoc) {
+    // ─── NEW TAG: Never seen before ───────────────────────────────────────
+    const newDoc = {
+      tags: [{
+        ...tag,
+        note: note || null,
+        owned: owned
+      }]
+    };
+    await putCouchDoc(docId, newDoc);
+    addLog({
+      type: 'new',
+      uid: docId,
+      message: 'New tag — never seen before. Created document.'
+    });
+    return { status: 'new' };
+  }
+
+  // ─── EXISTING DOCUMENT ──────────────────────────────────────────────────
+  const tags = existingDoc.tags || [];
+
+  // Check if this exact tag already exists in the array
+  const isDuplicate = tags.some(t => tagMatchesExisting(tag, t));
+
+  if (isDuplicate) {
+    // ─── DUPLICATE: Same tag scanned again ────────────────────────────────
+    addLog({
+      type: 'dup',
+      uid: docId,
+      message: 'Duplicate — this exact tag was already recorded. No changes made.'
+    });
+    return { status: 'duplicate' };
+  }
+
+  // ─── CONFLICT: Same UID, different chip details ─────────────────────────
+  const newEntry = {
+    ...tag,
+    note: note || null,
+    owned: owned
+  };
+  tags.push(newEntry);
+
+  const updatedDoc = {
+    _rev: existingDoc._rev,
+    tags: tags
+  };
+  await putCouchDoc(docId, updatedDoc);
+  addLog({
+    type: 'conflict',
+    uid: docId,
+    message: 'Same UID, different tag details. Added as new entry (now ' + tags.length + ' entries for this UID).'
+  });
+  return { status: 'conflict' };
+}
+
+// ─── Log ──────────────────────────────────────────────────────────────────────
+function addLog(entry) {
+  entry.time = new Date().toISOString();
+  state.logs.unshift(entry);
+  renderLog();
+}
+
+function renderLog() {
+  const container = document.getElementById('logContainer');
+  if (state.logs.length === 0) {
+    container.innerHTML = '<div class="empty-state">No scans yet.<br>Tap a tag to get started.</div>';
+    return;
+  }
+  container.innerHTML = state.logs.map(e => {
+    const badgeClass = { new: 'badge-new', dup: 'badge-dup', conflict: 'badge-conflict', error: 'badge-error' }[e.type] || 'badge-error';
+    const badgeText = { new: 'NEW', dup: 'DUPLICATE', conflict: 'SAME UID, DIFF TAG', error: 'ERROR' }[e.type] || 'ERROR';
+    return `
+      <div class="log-entry">
+        <span class="badge ${badgeClass}">${badgeText}</span>
+        ${e.uid ? `<span class="uid">${e.uid}</span>` : ''}
+        <div class="details">${e.message}</div>
+        <div class="time">${new Date(e.time).toLocaleString()}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+document.getElementById('saveSettings').addEventListener('click', () => {
+  state.settings.couchUrl = document.getElementById('couchUrl').value.trim().replace(/\/+$/, '');
+  state.settings.couchDb = document.getElementById('couchDb').value.trim();
+  state.settings.couchUser = document.getElementById('couchUser').value.trim();
+  state.settings.couchPass = document.getElementById('couchPass').value;
+
+  localStorage.setItem('nfc_couchUrl', state.settings.couchUrl);
+  localStorage.setItem('nfc_couchDb', state.settings.couchDb);
+  localStorage.setItem('nfc_couchUser', state.settings.couchUser);
+  localStorage.setItem('nfc_couchPass', state.settings.couchPass);
+
+  const msg = document.getElementById('settingsMsg');
+  msg.textContent = 'Settings saved.';
+  msg.className = 'status-msg ok';
+});
+
+document.getElementById('testConn').addEventListener('click', async () => {
+  const msg = document.getElementById('settingsMsg');
+  msg.textContent = 'Testing...';
+  msg.className = 'status-msg';
+
+  // Use current form values for testing
+  const url = document.getElementById('couchUrl').value.trim().replace(/\/+$/, '');
+  const db = document.getElementById('couchDb').value.trim();
+  const user = document.getElementById('couchUser').value.trim();
+  const pass = document.getElementById('couchPass').value;
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (user) {
+      headers['Authorization'] = 'Basic ' + btoa(`${user}:${pass}`);
+    }
+    // Try to create the DB (idempotent)
+    const res = await fetch(url + '/' + db, { method: 'PUT', headers });
+    if (res.status === 412 || res.ok) {
+      msg.textContent = '✓ Connection successful. Database "' + db + '" is ready.';
+      msg.className = 'status-msg ok';
+    } else {
+      const err = await res.json().catch(() => ({}));
+      msg.textContent = '✗ Failed: ' + res.status + (err.error ? ' - ' + err.error : '');
+      msg.className = 'status-msg err';
+    }
+  } catch (err) {
+    msg.textContent = '✗ Connection failed: ' + err.message;
+    msg.className = 'status-msg err';
+  }
+});
+
+// Load saved settings into form
+(function initSettings() {
+  document.getElementById('couchUrl').value = state.settings.couchUrl;
+  document.getElementById('couchDb').value = state.settings.couchDb;
+  document.getElementById('couchUser').value = state.settings.couchUser;
+  document.getElementById('couchPass').value = state.settings.couchPass;
+})();
+</script>
+</body>
+</html>
